@@ -1,6 +1,7 @@
 package bdb
 
 import (
+	"context"
 	"io"
 	"os"
 
@@ -61,7 +62,7 @@ func (db *BerkeleyDB) Close() error {
 	return db.file.Close()
 }
 
-func (db *BerkeleyDB) Read() <-chan dbi.Entry {
+func (db *BerkeleyDB) Read(ctx context.Context) <-chan dbi.Entry {
 	entries := make(chan dbi.Entry)
 
 	go func() {
@@ -118,6 +119,7 @@ func (db *BerkeleyDB) Read() <-chan dbi.Entry {
 
 				// Traverse the page to concatenate the data that may span multiple pages.
 				valueContent, err := HashPageValueContent(
+					ctx,
 					db.file,
 					pageData,
 					hashPageIndex,

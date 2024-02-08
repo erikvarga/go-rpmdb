@@ -1,8 +1,10 @@
 package rpmdb
 
 import (
+	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -823,4 +825,17 @@ func TestNevra(t *testing.T) {
 	require.NoError(t, err)
 	_, err = pkg.InstalledFiles()
 	require.Error(t, err)
+}
+
+func TestTimeoutPackages(t *testing.T) {
+	db, err := Open("testdata/centos7-many/Packages")
+	require.NoError(t, err)
+	ctxTimesOut, cancelFunc := context.WithTimeout(context.Background(), 1*time.Microsecond)
+	defer cancelFunc()
+	_, err = db.ListPackagesWithContext(ctxTimesOut)
+	if err == nil {
+		t.Errorf("Expected timeout parsing hash page")
+	} else {
+		assert.Equal(t, "timed out parsing hash page", err.Error())
+	}
 }
