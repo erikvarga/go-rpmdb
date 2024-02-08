@@ -1,4 +1,4 @@
-module github.com/knqyf263/go-rpmdb
+module github.com/erikvarga/go-rpmdb
 
 go 1.18
 
