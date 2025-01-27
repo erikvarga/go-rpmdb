@@ -102,6 +102,12 @@ func HashPageValueIndexes(data []byte, entries uint16, swapped bool) ([]uint16, 
 
 	// Every entry is a 2-byte offset that points somewhere in the current database page.
 	hashIndexSize := entries * HashIndexEntrySize
+
+	// Make sure there is enough data to index.
+	if len(data) < int(PageHeaderSize+hashIndexSize) {
+		return nil, xerrors.Errorf("invalid hash index: not enough data (%+v)", len(data))
+	}
+	
 	hashIndexData := data[PageHeaderSize : PageHeaderSize+hashIndexSize]
 
 	// data is stored in key-value pairs (https://github.com/berkeleydb/libdb/blob/5b7b02ae052442626af54c176335b67ecc613a30/src/dbinc/db_page.h#L591)
