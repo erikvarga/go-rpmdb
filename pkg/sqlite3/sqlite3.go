@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"os"
-	"slices"
 
 	dbi "github.com/erikvarga/go-rpmdb/pkg/db"
 	"golang.org/x/xerrors"
@@ -41,7 +40,14 @@ func Open(path string) (*SQLite3, error) {
 	// Prefer the "sqlite" driver from modernc.org/sqlite,
 	// but fall back to "sqlite3" driver from github.com/mattn/go-sqlite3
 	driver := "sqlite"
-	if !slices.Contains(sql.Drivers(), driver) {
+	hasMat := false
+	for _, d := range sql.Drivers() {
+		if d == driver {
+			hasMat = true
+			break
+		}
+	}
+	if !hasMat {
 		driver = "sqlite3"
 	}
 
