@@ -59,24 +59,31 @@ func (db *SQLite3) Read(ctx context.Context) <-chan dbi.Entry {
 	go func() {
 		defer close(entries)
 
-		rows, err := db.Query("SELECT blob FROM Packages")
+		rows, err := db.QueryContext(ctx, "SELECT blob FROM Packages")
 		if err != nil {
+			_ = db.Close()
 			entries <- dbi.Entry{
 				Err: xerrors.Errorf("failed to SELECT query: %w", err),
 			}
-		}
-		if err := db.Close(); err != nil {
-			entries <- dbi.Entry{
-				Err: xerrors.Errorf("failed to close DB: %w", err),
-			}
+			return
 		}
 
 		if rows == nil {
+			_ = db.Close()
 			entries <- dbi.Entry{
 				Err: xerrors.Errorf("query failed to return rows: %w", err),
 			}
 			return
 		}
+
+		defer func() {
+			_ = rows.Close()
+			if err := db.Close(); err != nil {
+				entries <- dbi.Entry{
+					Err: xerrors.Errorf("failed to close DB: %w", err),
+				}
+			}
+		}()
 
 		for rows.Next() {
 			var blob string
@@ -84,11 +91,16 @@ func (db *SQLite3) Read(ctx context.Context) <-chan dbi.Entry {
 				entries <- dbi.Entry{
 					Err: xerrors.Errorf("failed to Scan Row: %w", err),
 				}
+				return
 			}
 
-			entries <- dbi.Entry{
+			select {
+			case entries <- dbi.Entry{
 				Value: []byte(blob),
 				Err:   nil,
+			}:
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()

@@ -21,6 +21,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	pkgList, err := db.ListPackages()
 	if err != nil {
 		return err

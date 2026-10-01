@@ -119,6 +119,9 @@ func TestPackageList(t *testing.T) {
 			for i, p := range tt.pkgList {
 				assert.Equal(t, p, got[i])
 			}
+
+			err = db.Close()
+			require.NoError(t, err)
 		})
 	}
 }
@@ -838,4 +841,6 @@ func TestTimeoutPackages(t *testing.T) {
 	} else {
 		assert.Equal(t, "timed out parsing hash page", err.Error())
 	}
+	err = db.Close()
+	require.NoError(t, err)
 }

@@ -73,7 +73,15 @@ func (d *RpmDB) ListPackages() ([]*PackageInfo, error) {
 func (d *RpmDB) ListPackagesWithContext(ctx context.Context) ([]*PackageInfo, error) {
 	var pkgList []*PackageInfo
 
-	for entry := range d.db.Read(ctx) {
+	readCtx, cancel := context.WithCancel(ctx)
+	entries := d.db.Read(readCtx)
+	defer func() {
+		cancel()
+		for range entries {
+		}
+	}()
+
+	for entry := range entries {
 		if entry.Err != nil {
 			return nil, entry.Err
 		}
@@ -87,6 +95,10 @@ func (d *RpmDB) ListPackagesWithContext(ctx context.Context) ([]*PackageInfo, er
 			return nil, xerrors.Errorf("invalid package info: %w", err)
 		}
 		pkgList = append(pkgList, pkg)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	return pkgList, nil

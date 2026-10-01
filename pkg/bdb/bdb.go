@@ -25,11 +25,16 @@ type BerkeleyDB struct {
 	HashMetadata *HashMetadataPage
 }
 
-func Open(path string) (*BerkeleyDB, error) {
+func Open(path string) (db *BerkeleyDB, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if db == nil {
+			_ = file.Close()
+		}
+	}()
 
 	// read just a bit in to parse at least the metadata...
 	metadataBuff := make([]byte, 512)
@@ -69,6 +74,15 @@ func (db *BerkeleyDB) Read(ctx context.Context) <-chan dbi.Entry {
 		defer close(entries)
 
 		for pageNum := uint32(0); pageNum <= db.HashMetadata.LastPageNo; pageNum++ {
+			select {
+			case <-ctx.Done():
+				entries <- dbi.Entry{
+					Err: xerrors.Errorf("timed out parsing hash page"),
+				}
+				return
+			default:
+			}
+
 			pageData, err := slice(db.file, int(db.HashMetadata.PageSize))
 			if err != nil {
 				entries <- dbi.Entry{
