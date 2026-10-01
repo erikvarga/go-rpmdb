@@ -91,16 +91,26 @@ const NDB_DBVersion = 0
 
 var ErrorInvalidNDB = xerrors.Errorf("invalid or unsupported NDB format")
 
-func Open(path string) (*RpmNDB, error) {
+func Open(path string) (db *RpmNDB, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if db == nil {
+			_ = file.Close()
+		}
+	}()
 
 	err = syscallFlock(int(file.Fd()), syscallLOCK_SH)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if db == nil {
+			_ = syscallFlock(int(file.Fd()), syscallLOCK_UN)
+		}
+	}()
 
 	hdrBuff := ndbHeader{}
 	err = binary.Read(file, binary.LittleEndian, &hdrBuff)
@@ -146,6 +156,12 @@ func (db *RpmNDB) Read(ctx context.Context) <-chan dbi.Entry {
 		const NDB_BlobHeaderSize = int64(unsafe.Sizeof(ndbBlobHeader{}))
 
 		for _, slot := range db.slots {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			const NDB_SlotMagic = 'S' | 'l'<<8 | 'o'<<16 | 't'<<24
 			if slot.SlotMagic != NDB_SlotMagic {
 				fmt.Println("bad slot magic", slot.SlotMagic)
@@ -181,20 +197,29 @@ func (db *RpmNDB) Read(ctx context.Context) <-chan dbi.Entry {
 				entries <- dbi.Entry{
 					Err: xerrors.Errorf("unexpected NDB blob Magic for pkg %d: %x", slot.PkgIndex, blobHeaderBuff.BlobMagic),
 				}
+				return
 			}
 			if blobHeaderBuff.PkgIndex != slot.PkgIndex {
 				entries <- dbi.Entry{
 					Err: xerrors.Errorf("failed to find NDB blob for pkg %d", slot.PkgIndex),
 				}
+				return
 			}
 			// ### check that BlkCnt == (BLOBHEAD_SIZE + bloblen + BLOBTAIL_SIZE + PKGDB_BLK_SIZE - 1) / PKGDB_BLK_SIZE)
 
 			// Read Blob Content
 			BlobEntry := make([]byte, blobHeaderBuff.BlobLen)
 			_, err = db.file.Read(BlobEntry)
-			entries <- dbi.Entry{
+			select {
+			case entries <- dbi.Entry{
 				Value: BlobEntry,
 				Err:   err,
+			}:
+			case <-ctx.Done():
+				return
+			}
+			if err != nil {
+				return
 			}
 		}
 	}()

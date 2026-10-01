@@ -59,37 +59,57 @@ func (db *SQLite3) Read(ctx context.Context) <-chan dbi.Entry {
 	go func() {
 		defer close(entries)
 
-		rows, err := db.Query("SELECT blob FROM Packages")
+		rows, err := db.QueryContext(ctx, "SELECT blob FROM Packages")
 		if err != nil {
+			_ = db.Close()
 			entries <- dbi.Entry{
 				Err: xerrors.Errorf("failed to SELECT query: %w", err),
-			}
-		}
-		if err := db.Close(); err != nil {
-			entries <- dbi.Entry{
-				Err: xerrors.Errorf("failed to close DB: %w", err),
-			}
-		}
-
-		if rows == nil {
-			entries <- dbi.Entry{
-				Err: xerrors.Errorf("query failed to return rows: %w", err),
 			}
 			return
 		}
 
+		defer func() {
+			_ = rows.Close()
+			if err := db.Close(); err != nil {
+				entries <- dbi.Entry{
+					Err: xerrors.Errorf("failed to close DB: %w", err),
+				}
+			}
+		}()
+
 		for rows.Next() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			var blob string
 			if err := rows.Scan(&blob); err != nil {
 				entries <- dbi.Entry{
 					Err: xerrors.Errorf("failed to Scan Row: %w", err),
 				}
+				return
 			}
 
-			entries <- dbi.Entry{
+			select {
+			case entries <- dbi.Entry{
 				Value: []byte(blob),
 				Err:   nil,
+			}:
+			case <-ctx.Done():
+				return
 			}
+		}
+
+		if err := rows.Err(); err != nil {
+			select {
+			case entries <- dbi.Entry{
+				Err: xerrors.Errorf("failed to iterate rows: %w", err),
+			}:
+			case <-ctx.Done():
+			}
+			return
 		}
 	}()
 
