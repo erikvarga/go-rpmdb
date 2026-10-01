@@ -68,14 +68,6 @@ func (db *SQLite3) Read(ctx context.Context) <-chan dbi.Entry {
 			return
 		}
 
-		if rows == nil {
-			_ = db.Close()
-			entries <- dbi.Entry{
-				Err: xerrors.Errorf("query failed to return rows: %w", err),
-			}
-			return
-		}
-
 		defer func() {
 			_ = rows.Close()
 			if err := db.Close(); err != nil {
@@ -86,6 +78,12 @@ func (db *SQLite3) Read(ctx context.Context) <-chan dbi.Entry {
 		}()
 
 		for rows.Next() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			var blob string
 			if err := rows.Scan(&blob); err != nil {
 				entries <- dbi.Entry{
@@ -102,6 +100,16 @@ func (db *SQLite3) Read(ctx context.Context) <-chan dbi.Entry {
 			case <-ctx.Done():
 				return
 			}
+		}
+
+		if err := rows.Err(); err != nil {
+			select {
+			case entries <- dbi.Entry{
+				Err: xerrors.Errorf("failed to iterate rows: %w", err),
+			}:
+			case <-ctx.Done():
+			}
+			return
 		}
 	}()
 

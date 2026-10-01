@@ -156,6 +156,12 @@ func (db *RpmNDB) Read(ctx context.Context) <-chan dbi.Entry {
 		const NDB_BlobHeaderSize = int64(unsafe.Sizeof(ndbBlobHeader{}))
 
 		for _, slot := range db.slots {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			const NDB_SlotMagic = 'S' | 'l'<<8 | 'o'<<16 | 't'<<24
 			if slot.SlotMagic != NDB_SlotMagic {
 				fmt.Println("bad slot magic", slot.SlotMagic)

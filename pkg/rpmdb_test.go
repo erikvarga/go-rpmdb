@@ -3,6 +3,8 @@ package rpmdb
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"runtime/debug"
 	"testing"
 	"time"
 
@@ -94,6 +96,9 @@ func TestPackageList(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db, err := Open(tt.file)
 			require.NoError(t, err)
+			defer func() {
+				require.NoError(t, db.Close())
+			}()
 
 			got, err := db.ListPackages()
 			require.NoError(t, err)
@@ -119,9 +124,6 @@ func TestPackageList(t *testing.T) {
 			for i, p := range tt.pkgList {
 				assert.Equal(t, p, got[i])
 			}
-
-			err = db.Close()
-			require.NoError(t, err)
 		})
 	}
 }
@@ -783,6 +785,9 @@ func TestRpmDB_Package(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db, err := Open(tt.file)
 			require.NoError(t, err)
+			defer func() {
+				require.NoError(t, db.Close())
+			}()
 
 			got, err := db.Package(tt.pkgName)
 			if tt.wantErr != "" {
@@ -813,9 +818,6 @@ func TestRpmDB_Package(t *testing.T) {
 			got.GroupNames = nil
 
 			assert.Equal(t, tt.want, got)
-
-			err = db.Close()
-			require.NoError(t, err)
 		})
 	}
 }
@@ -833,6 +835,9 @@ func TestNevra(t *testing.T) {
 func TestTimeoutPackages(t *testing.T) {
 	db, err := Open("testdata/centos7-many/Packages")
 	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
 	ctxTimesOut, cancelFunc := context.WithTimeout(context.Background(), 1*time.Microsecond)
 	defer cancelFunc()
 	_, err = db.ListPackagesWithContext(ctxTimesOut)
@@ -841,6 +846,119 @@ func TestTimeoutPackages(t *testing.T) {
 	} else {
 		assert.Equal(t, "timed out parsing hash page", err.Error())
 	}
-	err = db.Close()
-	require.NoError(t, err)
+}
+
+func TestOpenErrorClosesFile(t *testing.T) {
+	prevGC := debug.SetGCPercent(-1)
+	defer debug.SetGCPercent(prevGC)
+
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{
+			name: "empty file",
+			data: nil,
+		},
+		{
+			name: "short header",
+			data: []byte("not-a-valid-rpm-db"),
+		},
+		{
+			name: "invalid 1024-byte header",
+			data: make([]byte, 1024),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpFile := filepath.Join(t.TempDir(), "Packages")
+			require.NoError(t, os.WriteFile(tmpFile, tt.data, 0600))
+
+			db, err := Open(tmpFile)
+			require.Error(t, err)
+			require.Nil(t, db)
+
+			require.NoError(t, os.Remove(tmpFile))
+		})
+	}
+}
+
+func TestOpenAndCloseReleasesFile(t *testing.T) {
+	prevGC := debug.SetGCPercent(-1)
+	defer debug.SetGCPercent(prevGC)
+
+	tests := []struct {
+		name string
+		file string
+	}{
+		{
+			name: "BDB",
+			file: "testdata/libuuid/Packages",
+		},
+		{
+			name: "NDB",
+			file: "testdata/sle15-bci/Packages.db",
+		},
+		{
+			name: "SQLite3",
+			file: "testdata/fedora35/rpmdb.sqlite",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := os.ReadFile(tt.file)
+			require.NoError(t, err)
+
+			tmpFile := filepath.Join(t.TempDir(), filepath.Base(tt.file))
+			require.NoError(t, os.WriteFile(tmpFile, data, 0600))
+
+			db, err := Open(tmpFile)
+			require.NoError(t, err)
+
+			pkgs, err := db.ListPackages()
+			require.NoError(t, err)
+			require.NotEmpty(t, pkgs)
+
+			require.NoError(t, db.Close())
+			require.NoError(t, os.Remove(tmpFile))
+		})
+	}
+}
+
+func TestListPackagesWithCanceledContext(t *testing.T) {
+	tests := []struct {
+		name string
+		file string
+	}{
+		{
+			name: "BDB",
+			file: "testdata/libuuid/Packages",
+		},
+		{
+			name: "NDB",
+			file: "testdata/sle15-bci/Packages.db",
+		},
+		{
+			name: "SQLite3",
+			file: "testdata/fedora35/rpmdb.sqlite",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := Open(tt.file)
+			require.NoError(t, err)
+			defer func() {
+				require.NoError(t, db.Close())
+			}()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			_, err = db.ListPackagesWithContext(ctx)
+			require.Error(t, err)
+		})
+	}
 }
